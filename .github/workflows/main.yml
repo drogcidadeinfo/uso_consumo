@@ -30,7 +30,7 @@ jobs:
         env:
           GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-          EMAIL_TO_FILIAL: ${{ secrets.EMAIL_MAP }}   # adjust name if needed
+          EMAIL_TO_FILIAL: ${{ secrets.EMAIL_MAP }}
         shell: bash
         run: |
           set -e
@@ -45,21 +45,21 @@ jobs:
           UPDATED='${{ steps.process.outputs.UPDATED_SHEETS_JSON }}'
           COUNT=$(python -c "import json; a=json.loads('''$UPDATED''' or '[]'); print(len(a))")
           TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    
+
           cat > last_run_status.json <<EOF
           {"updated_sheets": $UPDATED, "count": $COUNT, "timestamp_utc": "$TS"}
           EOF
-      
+
           echo "UPDATED_SHEETS_COUNT=$COUNT" >> "$GITHUB_OUTPUT"
 
-       - name: Commit last run status
-         shell: bash
-         run: |
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add last_run_status.json
-            git commit -m "Update last run status" || echo "No changes"
-            git push
+      - name: Commit last run status
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add last_run_status.json
+          git commit -m "Update last run status" || echo "No changes"
+          git push
       
       #- name: save sheets as pdf and send e-mail
         #env:
