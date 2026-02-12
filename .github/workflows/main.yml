@@ -25,9 +25,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Process PDF file and send E-mail
+      - name: process source table
         env:
           GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           EMAIL_TO_FILIAL: ${{ secrets.EMAIL_MAP }}
+        run: python scripts/data_calc.py
+
+      - name: save sheets as pdf and send e-mail
+        env:
+          GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
         run: python scripts/data_calc.py
