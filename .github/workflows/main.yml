@@ -38,4 +38,4 @@ jobs:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
-        run: python scripts/data_calc.py
+        run: python scripts/send_email.py
