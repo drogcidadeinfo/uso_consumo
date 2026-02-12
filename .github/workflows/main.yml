@@ -2,6 +2,15 @@ name: uso consumo e-mail sender
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "preview = só calcula e grava status | send = calcula + exporta + envia"
+        required: true
+        default: "preview"
+        type: choice
+        options:
+          - preview
+          - send
 
 permissions: write-all
 
@@ -18,7 +27,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v3
         with:
-          python-version: '3.x'
+          python-version: "3.x"
 
       - name: Install dependencies
         run: |
@@ -37,7 +46,7 @@ jobs:
           python scripts/data_calc.py | tee run.log
           grep '^UPDATED_SHEETS_JSON=' run.log >> "$GITHUB_OUTPUT"
 
-      - name: Build last run status
+      - name: Build status file (preview or send)
         id: status
         shell: bash
         run: |
@@ -46,27 +55,37 @@ jobs:
           COUNT=$(python -c "import json; a=json.loads('''$UPDATED''' or '[]'); print(len(a))")
           TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          cat > last_run_status.json <<EOF
-          {"updated_sheets": $UPDATED, "count": $COUNT, "timestamp_utc": "$TS"}
+          MODE="${{ github.event.inputs.mode }}"
+          if [ "$MODE" = "send" ]; then
+            STATUS_FILE="last_run_status.json"
+          else
+            STATUS_FILE="last_preview_status.json"
+          fi
+
+          cat > "$STATUS_FILE" <<EOF
+          {"updated_sheets": $UPDATED, "count": $COUNT, "timestamp_utc": "$TS", "mode": "$MODE"}
           EOF
 
+          echo "STATUS_FILE=$STATUS_FILE" >> "$GITHUB_OUTPUT"
           echo "UPDATED_SHEETS_COUNT=$COUNT" >> "$GITHUB_OUTPUT"
 
-      - name: Commit last run status
+      - name: Commit status file
         shell: bash
         run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add last_run_status.json
-          git commit -m "Update last run status" || echo "No changes"
+          git add last_preview_status.json last_run_status.json || true
+          git commit -m "Update status file(s)" || echo "No changes"
           git push
-      
-      #- name: save sheets as pdf and send e-mail
-        #env:
-          #UPDATED_SHEETS_JSON: ${{ steps.process.outputs.UPDATED_SHEETS_JSON }}
-          #GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
-          #SHEET_ID: ${{ secrets.SHEET_ID }}
-          #EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          #GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
-        #run: |
-          #python scripts/send_email.py
+
+      - name: save sheets as pdf and send e-mail
+        if: ${{ github.event.inputs.mode == 'send' }}
+        env:
+          UPDATED_SHEETS_JSON: ${{ steps.process.outputs.UPDATED_SHEETS_JSON }}
+          GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+        run: |
+          python scripts/send_email.py
