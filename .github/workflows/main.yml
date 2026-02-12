@@ -30,9 +30,13 @@ jobs:
         env:
           GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-          EMAIL_TO_FILIAL: ${{ secrets.EMAIL_MAP }}   # or secrets.EMAIL_TO_FILIAL if that's your secret name
+          EMAIL_TO_FILIAL: ${{ secrets.EMAIL_MAP }}   # adjust name if needed
+        shell: bash
         run: |
-          python scripts/data_calc.py >> $GITHUB_OUTPUT
+          set -e
+          python scripts/data_calc.py | tee run.log
+          grep '^UPDATED_SHEETS_JSON=' run.log >> "$GITHUB_OUTPUT"
+
       
       - name: save sheets as pdf and send e-mail
         env:
