@@ -68,7 +68,7 @@ jobs:
           fi
 
           cat > "$STATUS_FILE" <<EOF
-          {"updated_sheets": $UPDATED, "count": $COUNT, "timestamp_utc": "$TS", "mode": "$MODE"}
+          {"updated_sheets": $UPDATED, "count": $COUNT, "timestamp": "$TS", "mode": "$MODE"}
           EOF
 
           echo "STATUS_FILE=$STATUS_FILE" >> "$GITHUB_OUTPUT"
