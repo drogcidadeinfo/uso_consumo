@@ -95,6 +95,8 @@ def update_filial_tab(sh, filial_name, submission_row_dict):
 
         ws.update_cells(cell_list, value_input_option="USER_ENTERED")
 
+import json  # make sure this is imported at the top
+
 def main():
     sh = connect()
     df = read_responses_df(sh)
@@ -102,7 +104,11 @@ def main():
 
     if latest.empty:
         print("No submissions for current month.")
+        # still output empty list so the next step doesn't crash
+        print("UPDATED_SHEETS_JSON=[]")
         return
+
+    updated_tabs = []
 
     for _, row in latest.iterrows():
         email = row["Endereço de e-mail"].strip().lower()
@@ -112,10 +118,16 @@ def main():
             print(f"Skipping: email not mapped -> {email}")
             continue
 
-        # Convert to dict with column names matching the labels in filial tab
         submission = row.to_dict()
         update_filial_tab(sh, filial, submission)
         print(f"Updated {filial} from {email} ({submission.get('Carimbo de data/hora')})")
+
+        # ✅ track updated sheets (avoid duplicates)
+        if filial not in updated_tabs:
+            updated_tabs.append(filial)
+
+    # ✅ this is what GitHub Actions will capture into $GITHUB_OUTPUT
+    print(f"UPDATED_SHEETS_JSON={json.dumps(updated_tabs)}")
 
 if __name__ == "__main__":
     main()
