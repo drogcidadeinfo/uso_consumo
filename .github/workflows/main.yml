@@ -26,16 +26,20 @@ jobs:
           pip install -r requirements.txt
 
       - name: process source table
+        id: process
         env:
           GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-          EMAIL_TO_FILIAL: ${{ secrets.EMAIL_MAP }}
-        run: python scripts/data_calc.py
-
+          EMAIL_TO_FILIAL: ${{ secrets.EMAIL_MAP }}   # or secrets.EMAIL_TO_FILIAL if that's your secret name
+        run: |
+          python scripts/data_calc.py >> $GITHUB_OUTPUT
+      
       - name: save sheets as pdf and send e-mail
         env:
+          UPDATED_SHEETS_JSON: ${{ steps.process.outputs.UPDATED_SHEETS_JSON }}
           GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
-        run: python scripts/send_email.py
+        run: |
+          python scripts/send_email.py
