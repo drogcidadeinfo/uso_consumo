@@ -37,13 +37,36 @@ jobs:
           python scripts/data_calc.py | tee run.log
           grep '^UPDATED_SHEETS_JSON=' run.log >> "$GITHUB_OUTPUT"
 
-      
-      - name: save sheets as pdf and send e-mail
-        env:
-          UPDATED_SHEETS_JSON: ${{ steps.process.outputs.UPDATED_SHEETS_JSON }}
-          GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
-          SHEET_ID: ${{ secrets.SHEET_ID }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+      - name: Build last run status
+        id: status
+        shell: bash
         run: |
-          python scripts/send_email.py
+          set -e
+          UPDATED='${{ steps.process.outputs.UPDATED_SHEETS_JSON }}'
+          COUNT=$(python -c "import json; a=json.loads('''$UPDATED''' or '[]'); print(len(a))")
+          TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    
+          cat > last_run_status.json <<EOF
+          {"updated_sheets": $UPDATED, "count": $COUNT, "timestamp_utc": "$TS"}
+          EOF
+      
+          echo "UPDATED_SHEETS_COUNT=$COUNT" >> "$GITHUB_OUTPUT"
+
+       - name: Commit last run status
+         shell: bash
+         run: |
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add last_run_status.json
+            git commit -m "Update last run status" || echo "No changes"
+            git push
+      
+      #- name: save sheets as pdf and send e-mail
+        #env:
+          #UPDATED_SHEETS_JSON: ${{ steps.process.outputs.UPDATED_SHEETS_JSON }}
+          #GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
+          #SHEET_ID: ${{ secrets.SHEET_ID }}
+          #EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          #GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+        #run: |
+          #python scripts/send_email.py
