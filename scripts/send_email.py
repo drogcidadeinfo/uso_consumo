@@ -5,6 +5,7 @@ import requests
 from pathlib import Path
 from datetime import datetime
 from email.message import EmailMessage
+from google.auth.transport.requests import Request
 
 import gspread
 from google.oauth2 import service_account
@@ -53,7 +54,7 @@ def get_delegated_credentials(scopes):
 
 def export_sheet_to_pdf(spreadsheet_id, gid, creds, out_path):
     session = requests.Session()
-    creds.refresh(requests.Request())
+    creds.refresh(Request())
     session.headers.update({"Authorization": f"Bearer {creds.token}"})
 
     params = {
