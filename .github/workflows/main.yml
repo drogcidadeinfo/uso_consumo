@@ -1,12 +1,16 @@
 name: uso consumo e-mail sender
 
 on:
+  schedule:
+    # Runs every day at 14:00 UTC (11:00 BRT during standard time)
+    - cron: '0 14 * * *'
   workflow_dispatch:
+    # Keep manual trigger for testing
     inputs:
       mode:
         description: "preview = só calcula e grava status | send = calcula + exporta + envia"
         required: true
-        default: "preview"
+        default: "send"
         type: choice
         options:
           - preview
@@ -34,6 +38,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Download previous status file
+        uses: actions/cache@v3
+        with:
+          path: last_run_status.json
+          key: status-${{ github.run_id }}
+          restore-keys: |
+            status-
+
       - name: process source table
         id: process
         env:
@@ -45,14 +57,17 @@ jobs:
           set -e
           python scripts/data_calc.py | tee run.log
           grep '^UPDATED_SHEETS_JSON=' run.log >> "$GITHUB_OUTPUT"
+          grep '^NEWLY_UPDATED_SHEETS_JSON=' run.log >> "$GITHUB_OUTPUT" || echo "NEWLY_UPDATED_SHEETS_JSON=[]" >> "$GITHUB_OUTPUT"
 
-      - name: Build status file (preview or send)
+      - name: Build status file
         id: status
         shell: bash
         run: |
           set -e
           UPDATED='${{ steps.process.outputs.UPDATED_SHEETS_JSON }}'
+          NEWLY_UPDATED='${{ steps.process.outputs.NEWLY_UPDATED_SHEETS_JSON }}'
           COUNT=$(python -c "import json; a=json.loads('''$UPDATED''' or '[]'); print(len(a))")
+          NEW_COUNT=$(python -c "import json; a=json.loads('''$NEWLY_UPDATED''' or '[]'); print(len(a))")
           TS=$(python - <<'EOF'
           from datetime import datetime
           from zoneinfo import ZoneInfo
@@ -60,7 +75,13 @@ jobs:
           EOF
           )
 
-          MODE="${{ github.event.inputs.mode }}"
+          # For scheduled runs, always use "send" mode
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            MODE="send"
+          else
+            MODE="${{ github.event.inputs.mode }}"
+          fi
+
           if [ "$MODE" = "send" ]; then
             STATUS_FILE="last_run_status.json"
           else
@@ -68,11 +89,13 @@ jobs:
           fi
 
           cat > "$STATUS_FILE" <<EOF
-          {"updated_sheets": $UPDATED, "count": $COUNT, "timestamp": "$TS", "mode": "$MODE"}
+          {"updated_sheets": $UPDATED, "newly_updated_sheets": $NEWLY_UPDATED, "count": $COUNT, "new_count": $NEW_COUNT, "timestamp": "$TS", "mode": "$MODE"}
           EOF
 
           echo "STATUS_FILE=$STATUS_FILE" >> "$GITHUB_OUTPUT"
           echo "UPDATED_SHEETS_COUNT=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "NEWLY_UPDATED_SHEETS_COUNT=$NEW_COUNT" >> "$GITHUB_OUTPUT"
+          echo "MODE=$MODE" >> "$GITHUB_OUTPUT"
 
       - name: Commit status file
         shell: bash
@@ -85,12 +108,18 @@ jobs:
           git push
 
       - name: save sheets as pdf and send e-mail
-        if: ${{ github.event.inputs.mode == 'send' }}
+        if: ${{ steps.status.outputs.MODE == 'send' && steps.process.outputs.NEWLY_UPDATED_SHEETS_COUNT != '0' }}
         env:
-          UPDATED_SHEETS_JSON: ${{ steps.process.outputs.UPDATED_SHEETS_JSON }}
+          UPDATED_SHEETS_JSON: ${{ steps.process.outputs.NEWLY_UPDATED_SHEETS_JSON }}
           GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
         run: |
           python scripts/send_email.py
+
+      - name: Skip email (no new updates)
+        if: ${{ steps.status.outputs.MODE == 'send' && steps.process.outputs.NEWLY_UPDATED_SHEETS_COUNT == '0' }}
+        run: |
+          echo "No newly updated sheets to send via email."
+          echo "Current timestamp: $(date)"
