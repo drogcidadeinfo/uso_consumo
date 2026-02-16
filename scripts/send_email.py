@@ -19,7 +19,7 @@ from googleapiclient.discovery import build
 SHEET_ID = os.getenv("SHEET_ID")
 CREDS_JSON = os.getenv("GSA_CREDENTIALS")
 
-UPDATED_SHEETS_JSON = os.getenv("UPDATED_SHEETS_JSON", "[]")
+UPDATED_SHEETS_JSON = os.getenv("UPDATED_SHEETS_JSON", "[]")  # Now receives NEW_FILIAIS_JSON
 
 EMAIL_TO = os.getenv("EMAIL_TO")
 GMAIL_SENDER = os.getenv("GMAIL_SENDER")  
@@ -111,9 +111,9 @@ def send_email_with_attachments(creds, file_paths, subject, body):
 # ======================
 
 def main():
-    updated_sheets = json.loads(UPDATED_SHEETS_JSON)
-    if not updated_sheets:
-        print("No new sheets to export.")
+    new_filiais = json.loads(UPDATED_SHEETS_JSON)
+    if not new_filiais:
+        print("No new filiais to export.")
         return
 
     scopes = [
@@ -131,25 +131,25 @@ def main():
     now_str = now.strftime("%Y-%m-%d")
     br_time = now.strftime("%d/%m/%Y %H:%M")
 
-    for tab_name in updated_sheets:
-        ws = sh.worksheet(tab_name)
+    for filial_name in new_filiais:
+        ws = sh.worksheet(filial_name)
         gid = ws.id
 
         # Include date in filename
-        out_path = OUTPUT_DIR / f"{tab_name}_{now_str}.pdf"
-        print(f"Exporting {tab_name}...")
+        out_path = OUTPUT_DIR / f"{filial_name}_{now_str}.pdf"
+        print(f"Exporting {filial_name}...")
         export_sheet_to_pdf(SHEET_ID, gid, creds, out_path)
         exported_files.append(str(out_path))
 
-    # Update subject and body for daily run
-    subject = f"Uso/Consumo - Atualizações Diárias ({now_str})"
+    # Create email subject and body
+    subject = f"Uso/Consumo - Novas Submissões ({now_str})"
     
-    if len(updated_sheets) == 1:
-        body = f"Segue em anexo o PDF da filial atualizada: {updated_sheets[0]}.\n\nData/Hora: {br_time}"
+    if len(new_filiais) == 1:
+        body = f"Uma nova submissão foi recebida para a filial: {new_filiais[0]}.\n\nPDF em anexo.\n\nData/Hora: {br_time}"
     else:
-        body = f"Segue em anexo os PDFs das filiais atualizadas: {', '.join(updated_sheets)}.\n\nData/Hora: {br_time}"
+        body = f"Novas submissões recebidas para as seguintes filiais: {', '.join(new_filiais)}.\n\nPDFs em anexo.\n\nData/Hora: {br_time}"
 
-    print("Sending email with daily updates...")
+    print("Sending email with new submissions...")
     send_email_with_attachments(creds, exported_files, subject, body)
 
     print("Done.")
