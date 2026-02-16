@@ -3,6 +3,7 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+from pathlib import Path
 
 SHEET_ID = os.getenv("SHEET_ID")
 CREDS_JSON = os.getenv("GSA_CREDENTIALS")  
@@ -14,10 +15,6 @@ EMAIL_MAP_JSON = os.getenv("EMAIL_TO_FILIAL")
 if not EMAIL_MAP_JSON:
     raise ValueError("EMAIL_TO_FILIAL secret not set")
 
-EMAIL_TO_FILIAL = {
-    k.strip().lower(): v
-    for k, v in json.loads(EMAIL_MAP_JSON).items()
-}
 EMAIL_TO_FILIAL = json.loads(EMAIL_MAP_JSON)
 
 def connect():
@@ -95,7 +92,17 @@ def update_filial_tab(sh, filial_name, submission_row_dict):
 
         ws.update_cells(cell_list, value_input_option="USER_ENTERED")
 
-import json  # make sure this is imported at the top
+def read_previous_status():
+    """Read previously updated sheets from status file"""
+    try:
+        status_file = Path("last_run_status.json")
+        if status_file.exists():
+            with open(status_file, 'r') as f:
+                data = json.load(f)
+                return set(data.get("updated_sheets", []))
+    except Exception as e:
+        print(f"Could not read previous status: {e}")
+    return set()
 
 def main():
     sh = connect()
@@ -104,11 +111,15 @@ def main():
 
     if latest.empty:
         print("No submissions for current month.")
-        # still output empty list so the next step doesn't crash
         print("UPDATED_SHEETS_JSON=[]")
         return
 
+    # Read previously updated sheets
+    previously_updated = read_previous_status()
+    print(f"Previously updated sheets: {previously_updated}")
+
     updated_tabs = []
+    newly_updated_tabs = []
 
     for _, row in latest.iterrows():
         email = row["Endereço de e-mail"].strip().lower()
@@ -122,12 +133,17 @@ def main():
         update_filial_tab(sh, filial, submission)
         print(f"Updated {filial} from {email} ({submission.get('Carimbo de data/hora')})")
 
-        # ✅ track updated sheets (avoid duplicates)
+        # Track updated sheets
         if filial not in updated_tabs:
             updated_tabs.append(filial)
+            
+            # Check if this is newly updated
+            if filial not in previously_updated:
+                newly_updated_tabs.append(filial)
 
-    # ✅ this is what GitHub Actions will capture into $GITHUB_OUTPUT
+    # Output both lists
     print(f"UPDATED_SHEETS_JSON={json.dumps(updated_tabs)}")
+    print(f"NEWLY_UPDATED_SHEETS_JSON={json.dumps(newly_updated_tabs)}")
 
 if __name__ == "__main__":
     main()
