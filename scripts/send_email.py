@@ -113,7 +113,7 @@ def send_email_with_attachments(creds, file_paths, subject, body):
 def main():
     updated_sheets = json.loads(UPDATED_SHEETS_JSON)
     if not updated_sheets:
-        print("No sheets to export.")
+        print("No new sheets to export.")
         return
 
     scopes = [
@@ -127,23 +127,29 @@ def main():
     sh = gspread.authorize(creds).open_by_key(SHEET_ID)
 
     exported_files = []
-    now_str = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now()
+    now_str = now.strftime("%Y-%m-%d")
+    br_time = now.strftime("%d/%m/%Y %H:%M")
 
     for tab_name in updated_sheets:
         ws = sh.worksheet(tab_name)
         gid = ws.id
 
-        out_path = OUTPUT_DIR / f"{tab_name}.pdf"
+        # Include date in filename
+        out_path = OUTPUT_DIR / f"{tab_name}_{now_str}.pdf"
         print(f"Exporting {tab_name}...")
         export_sheet_to_pdf(SHEET_ID, gid, creds, out_path)
         exported_files.append(str(out_path))
 
-    # subject = f"Uso/Consumo - PDFs ({now_str})"
-    subject = f"e-mail teste"
-    # body = f"Segue em anexo os PDFs das filiais: {', '.join(updated_sheets)}."
-    body = f"esse e-mail é um teste"
+    # Update subject and body for daily run
+    subject = f"Uso/Consumo - Atualizações Diárias ({now_str})"
+    
+    if len(updated_sheets) == 1:
+        body = f"Segue em anexo o PDF da filial atualizada: {updated_sheets[0]}.\n\nData/Hora: {br_time}"
+    else:
+        body = f"Segue em anexo os PDFs das filiais atualizadas: {', '.join(updated_sheets)}.\n\nData/Hora: {br_time}"
 
-    print("Sending email...")
+    print("Sending email with daily updates...")
     send_email_with_attachments(creds, exported_files, subject, body)
 
     print("Done.")
