@@ -3,7 +3,6 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
-from pathlib import Path
 
 SHEET_ID = os.getenv("SHEET_ID")
 CREDS_JSON = os.getenv("GSA_CREDENTIALS")  
@@ -16,9 +15,6 @@ if not EMAIL_MAP_JSON:
     raise ValueError("EMAIL_TO_FILIAL secret not set")
 
 EMAIL_TO_FILIAL = json.loads(EMAIL_MAP_JSON)
-
-# File to track processed emails
-PROCESSED_EMAILS_FILE = Path("processed_emails.json")
 
 def connect():
     creds_dict = json.loads(CREDS_JSON)
@@ -95,25 +91,6 @@ def update_filial_tab(sh, filial_name, submission_row_dict):
 
         ws.update_cells(cell_list, value_input_option="USER_ENTERED")
 
-def load_processed_emails():
-    """Load the set of emails that have already been processed"""
-    try:
-        if PROCESSED_EMAILS_FILE.exists():
-            with open(PROCESSED_EMAILS_FILE, 'r') as f:
-                data = json.load(f)
-                return set(data.get("processed_emails", []))
-    except Exception as e:
-        print(f"Could not load processed emails: {e}")
-    return set()
-
-def save_processed_emails(emails):
-    """Save the set of processed emails"""
-    try:
-        with open(PROCESSED_EMAILS_FILE, 'w') as f:
-            json.dump({"processed_emails": list(emails)}, f, indent=2)
-    except Exception as e:
-        print(f"Could not save processed emails: {e}")
-
 def main():
     sh = connect()
     df = read_responses_df(sh)
@@ -121,29 +98,12 @@ def main():
 
     if latest.empty:
         print("No submissions for current month.")
-        print("PROCESSED_EMAILS_JSON=[]")
-        print("NEW_EMAILS_JSON=[]")
+        print("NEW_FILIAIS_JSON=[]")
         return
 
-    # Load previously processed emails
-    processed_emails = load_processed_emails()
-    print(f"Previously processed emails: {processed_emails}")
-
-    # Get all emails from current submissions
-    current_emails = set()
-    for _, row in latest.iterrows():
-        email = row["Endereço de e-mail"].strip().lower()
-        filial = EMAIL_TO_FILIAL.get(email)
-        if filial:  # Only track emails that have a valid mapping
-            current_emails.add(email)
-
-    # Find new emails (not in processed_emails)
-    new_emails = current_emails - processed_emails
-    print(f"New emails found: {new_emails}")
-
     # Process all submissions (update sheets)
-    updated_tabs = []
-    processed_this_run = set()
+    new_filiais = []
+    updated_tabs = []  # Keep track for logging
 
     for _, row in latest.iterrows():
         email = row["Endereço de e-mail"].strip().lower()
@@ -157,28 +117,14 @@ def main():
         update_filial_tab(sh, filial, submission)
         print(f"Updated {filial} from {email} ({submission.get('Carimbo de data/hora')})")
 
-        # Track updated sheets (for logging)
+        # Track updated sheets
         if filial not in updated_tabs:
             updated_tabs.append(filial)
-        
-        # Track processed emails
-        processed_this_run.add(email)
-
-    # Save all processed emails (including previous ones)
-    all_processed = processed_emails | processed_this_run
-    save_processed_emails(all_processed)
-
-    # For new emails, get their corresponding filiais
-    new_filiais = []
-    for email in new_emails:
-        filial = EMAIL_TO_FILIAL.get(email)
-        if filial and filial not in new_filiais:
             new_filiais.append(filial)
 
-    # Output results
+    # Output results - always send emails for updated sheets
     print(f"UPDATED_SHEETS_JSON={json.dumps(updated_tabs)}")
-    print(f"NEW_EMAILS_JSON={json.dumps(list(new_emails))}")
-    print(f"NEW_FILIAIS_JSON={json.dumps(new_filiais)}")
+    print(f"NEW_FILIAIS_JSON={json.dumps(new_filiais)}")  # This triggers email in send_email.py
 
 if __name__ == "__main__":
     main()
