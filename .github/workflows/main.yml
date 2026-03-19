@@ -1,139 +1,54 @@
-name: uso consumo e-mail sender
+name: Process Form Submissions
 
 on:
-  schedule:
-    # Runs every day at 14:00 UTC (11:00 BRT)
-    - cron: '0 14 * * *'
   workflow_dispatch:
-    inputs:
-      mode:
-        description: "preview = só calcula e grava status | send = calcula + exporta + envia"
-        required: true
-        default: "send"
-        type: choice
-        options:
-          - preview
-          - send
-
-permissions: write-all
+  # schedule:
+    # Runs every hour
+    # - cron: '0 * * * *'
 
 jobs:
-  run-scripts:
+  process:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v3
-        with:
-          python-version: "3.x"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas gspread google-auth requests google-api-python-client
-
-      - name: Download processed emails file
-        uses: actions/cache@v3
-        with:
-          path: processed_emails.json
-          key: processed-emails-${{ github.run_id }}
-          restore-keys: |
-            processed-emails-
-
-      - name: process source table
-        id: process
-        env:
-          GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
-          SHEET_ID: ${{ secrets.SHEET_ID }}
-          EMAIL_TO_FILIAL: ${{ secrets.EMAIL_MAP }}
-        shell: bash
-        run: |
-          set -e
-          python scripts/data_calc.py | tee run.log
-          grep '^UPDATED_SHEETS_JSON=' run.log >> "$GITHUB_OUTPUT"
-          grep '^NEW_EMAILS_JSON=' run.log >> "$GITHUB_OUTPUT" || echo "NEW_EMAILS_JSON=[]" >> "$GITHUB_OUTPUT"
-          grep '^NEW_FILIAIS_JSON=' run.log >> "$GITHUB_OUTPUT" || echo "NEW_FILIAIS_JSON=[]" >> "$GITHUB_OUTPUT"
-
-      - name: Build status file
-        id: status
-        shell: bash
-        run: |
-          set -e
-          UPDATED='${{ steps.process.outputs.UPDATED_SHEETS_JSON }}'
-          NEW_EMAILS='${{ steps.process.outputs.NEW_EMAILS_JSON }}'
-          NEW_FILIAIS='${{ steps.process.outputs.NEW_FILIAIS_JSON }}'
-          
-          COUNT=$(python -c "import json; a=json.loads('''$UPDATED''' or '[]'); print(len(a))")
-          NEW_COUNT=$(python -c "import json; a=json.loads('''$NEW_EMAILS''' or '[]'); print(len(a))")
-          NEW_FILIAIS_COUNT=$(python -c "import json; a=json.loads('''$NEW_FILIAIS''' or '[]'); print(len(a))")
-          
-          TS=$(python - <<'EOF'
-          from datetime import datetime
-          from zoneinfo import ZoneInfo
-          print(datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%dT%H:%M:%S"))
-          EOF
-          )
-
-          # For scheduled runs, always use "send" mode
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            MODE="send"
-          else
-            MODE="${{ github.event.inputs.mode }}"
-          fi
-
-          if [ "$MODE" = "send" ]; then
-            STATUS_FILE="last_run_status.json"
-          else
-            STATUS_FILE="last_preview_status.json"
-          fi
-
-          cat > "$STATUS_FILE" <<EOF
-          {
-            "updated_sheets": $UPDATED, 
-            "new_emails": $NEW_EMAILS, 
-            "new_filiais": $NEW_FILIAIS,
-            "count": $COUNT, 
-            "new_count": $NEW_COUNT,
-            "new_filiais_count": $NEW_FILIAIS_COUNT,
-            "timestamp": "$TS", 
-            "mode": "$MODE"
-          }
-          EOF
-
-          echo "STATUS_FILE=$STATUS_FILE" >> "$GITHUB_OUTPUT"
-          echo "UPDATED_SHEETS_COUNT=$COUNT" >> "$GITHUB_OUTPUT"
-          echo "NEW_EMAILS_COUNT=$NEW_COUNT" >> "$GITHUB_OUTPUT"
-          echo "NEW_FILIAIS_COUNT=$NEW_FILIAIS_COUNT" >> "$GITHUB_OUTPUT"
-          echo "MODE=$MODE" >> "$GITHUB_OUTPUT"
-
-      - name: Commit processed emails and status files
-        shell: bash
-        run: |
-          set -e
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add processed_emails.json last_preview_status.json last_run_status.json || true
-          git commit -m "Update processed emails and status files" || echo "No changes"
-          git push
-
-      - name: save sheets as pdf and send e-mail
-        if: ${{ steps.status.outputs.MODE == 'send' && steps.process.outputs.NEW_FILIAIS_COUNT != '0' }}
-        env:
-          UPDATED_SHEETS_JSON: ${{ steps.process.outputs.NEW_FILIAIS_JSON }}
-          GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
-          SHEET_ID: ${{ secrets.SHEET_ID }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
-        run: |
-          python scripts/send_email.py
-
-      - name: Skip email (no new emails)
-        if: ${{ steps.status.outputs.MODE == 'send' && steps.process.outputs.NEW_FILIAIS_COUNT == '0' }}
-        run: |
-          echo "No new email submissions to process."
-          echo "Current timestamp: $(date)"
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas gspread google-auth google-api-python-client requests
+    
+    - name: Create PDF output directory
+      run: mkdir -p pdf_out
+    
+    - name: Run data calculation
+      id: data_calc
+      env:
+        SHEET_ID: ${{ secrets.SHEET_ID }}
+        GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
+        EMAIL_TO_FILIAL: ${{ secrets.EMAIL_TO_FILIAL }}
+      run: |
+        python data_calc.py > output.txt
+        cat output.txt
+        
+        # Extract NEW_FILIAIS_JSON from output
+        NEW_FILIAIS_JSON=$(grep "^NEW_FILIAIS_JSON=" output.txt | cut -d'=' -f2-)
+        echo "NEW_FILIAIS_JSON=$NEW_FILIAIS_JSON" >> $GITHUB_ENV
+    
+    - name: Send emails if there are new submissions
+      if: env.NEW_FILIAIS_JSON != '[]'
+      env:
+        SHEET_ID: ${{ secrets.SHEET_ID }}
+        GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
+        NEW_FILIAIS_JSON: ${{ env.NEW_FILIAIS_JSON }}
+        EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+      run: |
+        echo "New submissions detected for: $NEW_FILIAIS_JSON"
+        python send_email.py
