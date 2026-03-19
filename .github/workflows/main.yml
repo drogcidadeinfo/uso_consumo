@@ -32,7 +32,7 @@ jobs:
       env:
         SHEET_ID: ${{ secrets.SHEET_ID }}
         GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
-        EMAIL_TO_FILIAL: ${{ secrets.EMAIL_TO_FILIAL }}
+        EMAIL_TO_FILIAL: ${{ secrets.EMAIL_MAP }}
       run: |
         python scripts/data_calc.py > output.txt
         cat output.txt
