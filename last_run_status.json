@@ -1,10 +1,10 @@
 {
-  "updated_sheets": ["F8", "F14", "F6", "F12", "F4", "F1", "F3", "F10", "F18", "F7", "F16", "F2", "F15", "F9", "F17"], 
+  "updated_sheets": ["F8", "F14", "F6", "F12", "F4", "F1", "F3", "F10", "F18", "F7", "F16", "F2", "F15", "F9", "F17", "F13"], 
   "new_emails": [], 
   "new_filiais": [],
-  "count": 15, 
+  "count": 16, 
   "new_count": 0,
   "new_filiais_count": 0,
-  "timestamp": "2026-03-18T11:55:38", 
+  "timestamp": "2026-03-19T10:01:42", 
   "mode": "send"
 }
