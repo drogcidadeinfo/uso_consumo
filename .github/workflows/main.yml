@@ -34,7 +34,7 @@ jobs:
         GSA_CREDENTIALS: ${{ secrets.GSA_CREDENTIALS }}
         EMAIL_TO_FILIAL: ${{ secrets.EMAIL_TO_FILIAL }}
       run: |
-        python data_calc.py > output.txt
+        python scripts/data_calc.py > output.txt
         cat output.txt
         
         # Extract NEW_FILIAIS_JSON from output
@@ -51,4 +51,4 @@ jobs:
         GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
       run: |
         echo "New submissions detected for: $NEW_FILIAIS_JSON"
-        python send_email.py
+        python scripts/send_email.py
