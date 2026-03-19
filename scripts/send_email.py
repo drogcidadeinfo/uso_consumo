@@ -19,7 +19,7 @@ from googleapiclient.discovery import build
 SHEET_ID = os.getenv("SHEET_ID")
 CREDS_JSON = os.getenv("GSA_CREDENTIALS")
 
-UPDATED_SHEETS_JSON = os.getenv("UPDATED_SHEETS_JSON", "[]")  # Now receives NEW_FILIAIS_JSON
+NEW_FILIAIS_JSON = os.getenv("NEW_FILIAIS_JSON", "[]")  # Receives filiais to email
 
 EMAIL_TO = os.getenv("EMAIL_TO")
 GMAIL_SENDER = os.getenv("GMAIL_SENDER")  
@@ -111,7 +111,7 @@ def send_email_with_attachments(creds, file_paths, subject, body):
 # ======================
 
 def main():
-    new_filiais = json.loads(UPDATED_SHEETS_JSON)
+    new_filiais = json.loads(NEW_FILIAIS_JSON)
     if not new_filiais:
         print("No new filiais to export.")
         return
