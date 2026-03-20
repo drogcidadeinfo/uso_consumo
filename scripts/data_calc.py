@@ -63,6 +63,35 @@ def build_label_row_map(filial_ws):
             label_to_row[label] = i
     return label_to_row
 
+def check_if_already_updated_for_current_month(filial_ws, current_month, current_year):
+    """
+    Check cell B1 to see if it contains a date for the current month
+    Returns True if already updated this month, False otherwise
+    """
+    try:
+        # Get value from B1
+        b1_value = filial_ws.cell(1, 2).value  # Row 1, Column 2 (B1)
+        
+        if not b1_value:
+            return False
+        
+        # Try to parse the date - assume it might be a string like "15/03/2026" or datetime object
+        if isinstance(b1_value, str):
+            # Try different date formats
+            for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y"]:
+                try:
+                    b1_date = datetime.strptime(b1_value, fmt)
+                    return (b1_date.year == current_year and b1_date.month == current_month)
+                except ValueError:
+                    continue
+        elif isinstance(b1_value, datetime):
+            return (b1_value.year == current_year and b1_value.month == current_month)
+        
+        return False
+    except Exception as e:
+        print(f"Error checking B1: {e}")
+        return False
+
 def update_filial_tab(sh, filial_name, submission_row_dict):
     ws = sh.worksheet(filial_name)
 
@@ -101,7 +130,11 @@ def main():
         print("NEW_FILIAIS_JSON=[]")
         return
 
-    # Process all submissions (update sheets)
+    now = datetime.now()
+    current_month = now.month
+    current_year = now.year
+    
+    # Process all submissions (update sheets only if not already updated)
     new_filiais = []
     updated_tabs = []  # Keep track for logging
 
@@ -113,18 +146,37 @@ def main():
             print(f"Skipping: email not mapped -> {email}")
             continue
 
+        # Check if this filial sheet already has B1 with current month's date
+        filial_ws = sh.worksheet(filial)
+        already_updated = check_if_already_updated_for_current_month(filial_ws, current_month, current_year)
+        
+        if already_updated:
+            print(f"SKIPPING: {filial} already updated for {current_month}/{current_year} (B1 contains current month date)")
+            continue
+        
+        # If not updated, process it
         submission = row.to_dict()
         update_filial_tab(sh, filial, submission)
-        print(f"Updated {filial} from {email} ({submission.get('Carimbo de data/hora')})")
+        
+        # After updating, add current date to B1
+        current_date_str = now.strftime("%d/%m/%Y")
+        filial_ws.update_cell(1, 2, current_date_str)  # Row 1, Column 2 (B1)
+        
+        print(f"UPDATED: {filial} from {email} ({submission.get('Carimbo de data/hora')})")
 
         # Track updated sheets
         if filial not in updated_tabs:
             updated_tabs.append(filial)
             new_filiais.append(filial)
 
-    # Output results - always send emails for updated sheets
+    # Output results - only send emails for sheets that were actually updated
     print(f"UPDATED_SHEETS_JSON={json.dumps(updated_tabs)}")
-    print(f"NEW_FILIAIS_JSON={json.dumps(new_filiais)}")  # This triggers email in send_email.py
+    print(f"NEW_FILIAIS_JSON={json.dumps(new_filiais)}")
+    
+    if new_filiais:
+        print(f"Will send emails for {len(new_filiais)} filiais: {new_filiais}")
+    else:
+        print("No new updates needed - all filiais already have current month data")
 
 if __name__ == "__main__":
     main()
