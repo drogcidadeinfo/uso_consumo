@@ -2,6 +2,7 @@ import os, json
 import pandas as pd
 import gspread
 import time
+import re
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
@@ -67,6 +68,50 @@ def build_label_row_map(filial_ws):
             label_to_row[label] = i
     return label_to_row
 
+def parse_date_from_cell(value):
+    """
+    Parse date from cell value that could be:
+    - datetime object
+    - string like "12/03/2026 11:33:45"
+    - string like "12/03/2026"
+    - string like "2026-03-12"
+    """
+    if not value:
+        return None
+    
+    # If it's already a datetime object
+    if isinstance(value, datetime):
+        return value
+    
+    # If it's a string
+    if isinstance(value, str):
+        # Try different date formats
+        formats = [
+            "%d/%m/%Y %H:%M:%S",  # 12/03/2026 11:33:45
+            "%d/%m/%Y",           # 12/03/2026
+            "%Y-%m-%d",           # 2026-03-12
+            "%d/%m/%y",           # 12/03/26
+            "%Y-%m-%d %H:%M:%S",  # 2026-03-12 11:33:45
+        ]
+        
+        for fmt in formats:
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+        
+        # Try using regex to extract date if formats fail
+        # Look for pattern DD/MM/YYYY
+        match = re.search(r'(\d{2})/(\d{2})/(\d{4})', value)
+        if match:
+            day, month, year = match.groups()
+            try:
+                return datetime(int(year), int(month), int(day))
+            except ValueError:
+                pass
+    
+    return None
+
 def check_filiais_already_updated_batch(sh, filiais, current_month, current_year):
     """
     Batch check B1 for all filiais at once to minimize API calls
@@ -85,24 +130,23 @@ def check_filiais_already_updated_batch(sh, filiais, current_month, current_year
                 b1_value = ws.cell(1, 2).value  # Row 1, Column 2 (B1)
                 
                 if not b1_value:
+                    print(f"DEBUG: {filial} B1 is empty")
                     result[filial] = False
                     continue
                 
-                # Try to parse the date
-                updated = False
-                if isinstance(b1_value, str):
-                    # Try different date formats
-                    for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y"]:
-                        try:
-                            b1_date = datetime.strptime(b1_value, fmt)
-                            updated = (b1_date.year == current_year and b1_date.month == current_month)
-                            break
-                        except ValueError:
-                            continue
-                elif isinstance(b1_value, datetime):
-                    updated = (b1_value.year == current_year and b1_value.month == current_month)
+                # Parse the date from B1
+                b1_date = parse_date_from_cell(b1_value)
                 
-                result[filial] = updated
+                if b1_date:
+                    already_updated = (b1_date.year == current_year and b1_date.month == current_month)
+                    if already_updated:
+                        print(f"DEBUG: {filial} B1 value '{b1_value}' parsed to {b1_date.strftime('%d/%m/%Y')} - ALREADY UPDATED")
+                    else:
+                        print(f"DEBUG: {filial} B1 value '{b1_value}' parsed to {b1_date.strftime('%d/%m/%Y')} - NEEDS UPDATE")
+                    result[filial] = already_updated
+                else:
+                    print(f"DEBUG: {filial} Could not parse B1 value: '{b1_value}'")
+                    result[filial] = False  # Assume not updated if we can't parse
                 
                 # Small delay to avoid rate limits
                 time.sleep(API_DELAY)
@@ -197,10 +241,10 @@ def main():
             submission = row.to_dict()
             update_filial_tab(sh, filial, submission)
             
-            # After updating, add current date to B1
-            current_date_str = now.strftime("%d/%m/%Y")
+            # After updating, add current date and time to B1 (keep existing format)
+            current_datetime_str = now.strftime("%d/%m/%Y %H:%M:%S")
             filial_ws = sh.worksheet(filial)
-            filial_ws.update_cell(1, 2, current_date_str)
+            filial_ws.update_cell(1, 2, current_datetime_str)
             time.sleep(API_DELAY)
             
             print(f"UPDATED: {filial} from {email} ({submission.get('Carimbo de data/hora')})")
