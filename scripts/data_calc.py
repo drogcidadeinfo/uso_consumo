@@ -1,6 +1,7 @@
 import os, json
 import pandas as pd
 import gspread
+import time
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
@@ -15,6 +16,9 @@ if not EMAIL_MAP_JSON:
     raise ValueError("EMAIL_TO_FILIAL secret not set")
 
 EMAIL_TO_FILIAL = json.loads(EMAIL_MAP_JSON)
+
+# Rate limiting delay (in seconds)
+API_DELAY = 0.5  # Half second between API calls
 
 def connect():
     creds_dict = json.loads(CREDS_JSON)
@@ -63,42 +67,65 @@ def build_label_row_map(filial_ws):
             label_to_row[label] = i
     return label_to_row
 
-def check_if_already_updated_for_current_month(filial_ws, current_month, current_year):
+def check_filiais_already_updated_batch(sh, filiais, current_month, current_year):
     """
-    Check cell B1 to see if it contains a date for the current month
-    Returns True if already updated this month, False otherwise
+    Batch check B1 for all filiais at once to minimize API calls
+    Returns dict of filial_name -> bool (True if already updated)
     """
-    try:
-        # Get value from B1
-        b1_value = filial_ws.cell(1, 2).value  # Row 1, Column 2 (B1)
+    result = {}
+    
+    # Process in small batches to avoid rate limits
+    batch_size = 5
+    for i in range(0, len(filiais), batch_size):
+        batch = filiais[i:i+batch_size]
         
-        if not b1_value:
-            return False
-        
-        # Try to parse the date - assume it might be a string like "15/03/2026" or datetime object
-        if isinstance(b1_value, str):
-            # Try different date formats
-            for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y"]:
-                try:
-                    b1_date = datetime.strptime(b1_value, fmt)
-                    return (b1_date.year == current_year and b1_date.month == current_month)
-                except ValueError:
+        for filial in batch:
+            try:
+                ws = sh.worksheet(filial)
+                b1_value = ws.cell(1, 2).value  # Row 1, Column 2 (B1)
+                
+                if not b1_value:
+                    result[filial] = False
                     continue
-        elif isinstance(b1_value, datetime):
-            return (b1_value.year == current_year and b1_value.month == current_month)
+                
+                # Try to parse the date
+                updated = False
+                if isinstance(b1_value, str):
+                    # Try different date formats
+                    for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y"]:
+                        try:
+                            b1_date = datetime.strptime(b1_value, fmt)
+                            updated = (b1_date.year == current_year and b1_date.month == current_month)
+                            break
+                        except ValueError:
+                            continue
+                elif isinstance(b1_value, datetime):
+                    updated = (b1_value.year == current_year and b1_value.month == current_month)
+                
+                result[filial] = updated
+                
+                # Small delay to avoid rate limits
+                time.sleep(API_DELAY)
+                
+            except Exception as e:
+                print(f"Error checking {filial}: {e}")
+                result[filial] = False  # Assume not updated on error
         
-        return False
-    except Exception as e:
-        print(f"Error checking B1: {e}")
-        return False
+        # Extra delay between batches
+        if i + batch_size < len(filiais):
+            time.sleep(API_DELAY * 2)
+    
+    return result
 
 def update_filial_tab(sh, filial_name, submission_row_dict):
     ws = sh.worksheet(filial_name)
 
     # Clear column B entirely (except header if needed)
     ws.batch_clear(["B1:B200"])
+    time.sleep(API_DELAY)  # Delay after clear
 
     label_to_row = build_label_row_map(ws)
+    time.sleep(API_DELAY)  # Delay after reading column A
 
     updates = []
 
@@ -119,6 +146,7 @@ def update_filial_tab(sh, filial_name, submission_row_dict):
                 cell_map[r].value = v
 
         ws.update_cells(cell_list, value_input_option="USER_ENTERED")
+        time.sleep(API_DELAY)  # Delay after update
 
 def main():
     sh = connect()
@@ -134,10 +162,23 @@ def main():
     current_month = now.month
     current_year = now.year
     
-    # Process all submissions (update sheets only if not already updated)
+    # Get unique filiais from submissions
+    unique_filiais = set()
+    for _, row in latest.iterrows():
+        email = row["Endereço de e-mail"].strip().lower()
+        filial = EMAIL_TO_FILIAL.get(email)
+        if filial:
+            unique_filiais.add(filial)
+    
+    print(f"Found {len(unique_filiais)} unique filiais in submissions")
+    
+    # Batch check all filiais at once
+    updated_status = check_filiais_already_updated_batch(sh, list(unique_filiais), current_month, current_year)
+    
+    # Process only filiais that need updating
     new_filiais = []
-    updated_tabs = []  # Keep track for logging
-
+    updated_tabs = []
+    
     for _, row in latest.iterrows():
         email = row["Endereço de e-mail"].strip().lower()
         filial = EMAIL_TO_FILIAL.get(email)
@@ -146,30 +187,34 @@ def main():
             print(f"Skipping: email not mapped -> {email}")
             continue
 
-        # Check if this filial sheet already has B1 with current month's date
-        filial_ws = sh.worksheet(filial)
-        already_updated = check_if_already_updated_for_current_month(filial_ws, current_month, current_year)
-        
-        if already_updated:
-            print(f"SKIPPING: {filial} already updated for {current_month}/{current_year} (B1 contains current month date)")
+        # Check if this filial needs updating
+        if updated_status.get(filial, False):
+            print(f"SKIPPING: {filial} already updated for {current_month}/{current_year}")
             continue
         
-        # If not updated, process it
-        submission = row.to_dict()
-        update_filial_tab(sh, filial, submission)
-        
-        # After updating, add current date to B1
-        current_date_str = now.strftime("%d/%m/%Y")
-        filial_ws.update_cell(1, 2, current_date_str)  # Row 1, Column 2 (B1)
-        
-        print(f"UPDATED: {filial} from {email} ({submission.get('Carimbo de data/hora')})")
+        # Process update
+        try:
+            submission = row.to_dict()
+            update_filial_tab(sh, filial, submission)
+            
+            # After updating, add current date to B1
+            current_date_str = now.strftime("%d/%m/%Y")
+            filial_ws = sh.worksheet(filial)
+            filial_ws.update_cell(1, 2, current_date_str)
+            time.sleep(API_DELAY)
+            
+            print(f"UPDATED: {filial} from {email} ({submission.get('Carimbo de data/hora')})")
 
-        # Track updated sheets
-        if filial not in updated_tabs:
-            updated_tabs.append(filial)
-            new_filiais.append(filial)
+            # Track updated sheets
+            if filial not in updated_tabs:
+                updated_tabs.append(filial)
+                new_filiais.append(filial)
+                
+        except Exception as e:
+            print(f"ERROR updating {filial}: {e}")
+            continue
 
-    # Output results - only send emails for sheets that were actually updated
+    # Output results
     print(f"UPDATED_SHEETS_JSON={json.dumps(updated_tabs)}")
     print(f"NEW_FILIAIS_JSON={json.dumps(new_filiais)}")
     
