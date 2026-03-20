@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import requests
+import pytz
 import time  # Add this import
 from pathlib import Path
 from datetime import datetime
@@ -145,9 +146,14 @@ def main():
     sh = gspread.authorize(creds).open_by_key(SHEET_ID)
 
     exported_files = []
+    # Date for e-mail title
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d")
-    br_time = now.strftime("%d/%m/%Y %H:%M")
+    
+    # Date/time for e-mail body
+    local_tz = pytz.timezone('America/Sao_Paulo')  # Or 'Etc/GMT+3'
+    now_local = datetime.now(local_tz)
+    br_time = now_local.strftime("%d/%m/%Y %H:%M")
 
     for i, filial_name in enumerate(new_filiais):
         ws = sh.worksheet(filial_name)
